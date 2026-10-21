@@ -1,0 +1,4 @@
+Esta carpeta se llena con el .zip que genera la ultima celda del notebook
+(Redes_Neuronales_Clubes_2026_IA_v2.ipynb): descomprimelo en la RAIZ del repositorio.
+
+Debe contener: config.json, elos.json, partidos.csv.gz, redes.npz, rf.joblib, scaler.joblib
