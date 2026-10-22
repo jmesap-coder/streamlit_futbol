@@ -12,11 +12,11 @@ from .redes import RedesNumpy
 N_GRUPOS_RF = 20   # los arboles del RF se agrupan en 20 sub-bosques para suavizar probabilidades
 
 LIGAS = {
-    'E0': 'Premier League (Inglaterra)',
-    'SP1': 'La Liga (España)',
-    'I1': 'Serie A (Italia)',
-    'D1': 'Bundesliga (Alemania)',
-    'F1': 'Ligue 1 (Francia)',
+    'SP1': 'La Liga',
+    'E0': 'Premier League',
+    'I1': 'Serie A',
+    'D1': 'Bundesliga',
+    'F1': 'Ligue 1',
 }
 
 
@@ -78,6 +78,15 @@ class Predictor:
         return miembros, w, feat
 
     # ---------- Monte Carlo ----------
+    def prediccion(self, local, visitante):
+        """Probabilidades exactas (sin sorteo) de cada modelo y de la mezcla, mas las variables del partido."""
+        miembros, w, feat = self.miembros(local, visitante)
+        n_nn = len(self.redes)
+        p_nn = miembros[:n_nn] if n_nn else None
+        p_rf = miembros[n_nn:]
+        return dict(features=feat, miembros=miembros, pesos=w, p_mezcla=w @ miembros,
+                    p_nn=p_nn, p_rf=p_rf, n_arboles=len(self.rf.estimators_), n_redes=n_nn)
+
     def simular_partido(self, local, visitante, n_sim=20000, semilla=2026):
         rng = np.random.default_rng(semilla)
         miembros, w, feat = self.miembros(local, visitante)
@@ -87,8 +96,43 @@ class Predictor:
         freq = np.bincount(res, minlength=3) / n_sim
         ee = np.sqrt(freq * (1 - freq) / n_sim)       # error estandar de Monte Carlo
         lo, hi = np.percentile(P, [5, 95], axis=0)    # rango de desacuerdo entre modelos
-        return dict(freq=freq, error_mc=ee, rango_lo=lo, rango_hi=hi,
-                    ganador=LABELS[int(np.argmax(freq))], n_sim=n_sim, features=feat)
+        # convergencia: frecuencia acumulada tras n simulaciones
+        cp = np.unique(np.geomspace(20, n_sim, 60).astype(int))
+        acum = np.cumsum(np.eye(3)[res], axis=0)[cp - 1] / cp[:, None]
+        conv = pd.DataFrame({"n": np.repeat(cp, 3), "resultado": np.tile([0, 1, 2], len(cp)),
+                             "frecuencia": acum.ravel()})
+        return dict(freq=freq, error_mc=ee, rango_lo=lo, rango_hi=hi, p_mezcla=w @ miembros,
+                    ganador=LABELS[int(np.argmax(freq))], n_sim=n_sim, features=feat, convergencia=conv)
+
+    # ---------- datos auxiliares para la interfaz ----------
+    def historial(self, a, b, n=5):
+        """Enfrentamientos directos entre a y b en el dataset."""
+        df = self.df_hist
+        m = df[((df.home_team == a) & (df.away_team == b)) | ((df.home_team == b) & (df.away_team == a))]
+        gana_a = ((m.home_team == a) & (m.home_score > m.away_score)) | ((m.away_team == a) & (m.away_score > m.home_score))
+        gana_b = ((m.home_team == b) & (m.home_score > m.away_score)) | ((m.away_team == b) & (m.away_score > m.home_score))
+        emp = m.home_score == m.away_score
+        ult = m.tail(n).iloc[::-1]
+        return dict(
+            total=len(m), gana_a=int(gana_a.sum()), gana_b=int(gana_b.sum()), empates=int(emp.sum()),
+            desde=(m["date"].min().year if len(m) else None), hasta=(m["date"].max().year if len(m) else None),
+            ultimos=[(r.date.strftime("%Y-%m"), r.home_team, int(r.home_score), int(r.away_score), r.away_team)
+                     for r in ult.itertuples()])
+
+    def importancias(self, top=12):
+        imp = pd.Series(self.rf.feature_importances_, index=FEATURES).sort_values(ascending=False)
+        return imp.head(top)
+
+    def ranking_elo(self, top=15):
+        reci = set(self.equipos())
+        elo = pd.Series({k: v for k, v in self.elos.items() if k in reci}).sort_values(ascending=False)
+        return elo.head(top)
+
+    def resumen_dataset(self):
+        df = self.df_hist
+        return dict(partidos=len(df), equipos=len(set(df.home_team) | set(df.away_team)),
+                    desde=df["date"].min().year, hasta=df["date"].max().strftime("%Y-%m-%d"),
+                    ligas=df["tournament"].nunique())
 
     def simular_liga(self, equipos, n_sim=20000, semilla=2026):
         """Liga todos contra todos (ida y vuelta). Una simulacion usa UN mismo modelo en todos

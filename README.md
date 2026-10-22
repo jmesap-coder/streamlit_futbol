@@ -12,7 +12,8 @@ streamlit_futbol/
 ├── futbol/
 │   ├── features.py         # variables de cada partido (copiadas del notebook)
 │   ├── redes.py            # inferencia de las redes con NumPy (no requiere PyTorch)
-│   └── predictor.py        # carga de modelos + Monte Carlo
+│   ├── predictor.py        # carga de modelos + Monte Carlo
+│   └── ui.py               # estilos (tema oscuro) y bloques HTML
 ├── modelos/                # artefactos entrenados (los genera el notebook)
 └── .streamlit/config.toml
 ```
